@@ -10,6 +10,8 @@ builder.Services.AddOpenApi();
 builder.Services.AddAuthenticationAndConfigure(builder.Configuration);
 builder.Services.AddAuthorization();
 
+builder.Services.AddIpAllowlist(builder.Configuration);
+
 builder.Services.AddRateLimiter(options =>
 {
     // 429 Too Many Requests is returned when the limit is exceeded
@@ -115,6 +117,10 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// IP allow-list: only endpoints that call .RequireIpAllowlist() are gated.
+// Placed before the rate limiter so blocked IPs never consume quota.
+app.UseIpAllowlist();
+
 // Rate-limiting middleware must be added to the pipeline before endpoint mapping
 app.UseRateLimiter();
 
@@ -147,6 +153,18 @@ app.MapGet("/limit/apikey", (HttpContext ctx) =>
     .WithName("ApiKeyEndpoint")
     .RequireAuthorization()               // standard auth enforcement – 401 if not authenticated
     .RequireRateLimiting("api-key");
+
+// ── 6. IP Allow-list (opt-in) ────────────────────────────────────────────────
+// Only IPs listed under "IpAllowlist:AllowedIPs" in appsettings.json can reach
+// this endpoint.  Any other caller receives 403 Forbidden.
+// Remove .RequireIpAllowlist() from an endpoint to open it to all IPs.
+app.MapGet("/limit/ip-allowlist", (HttpContext ctx) =>
+    {
+        var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return Results.Ok($"Welcome, {ip} – your IP is on the allow-list.");
+    })
+    .WithName("IpAllowlistEndpoint")
+    .RequireIpAllowlist();
 
 app.Run();
 
